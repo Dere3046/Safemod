@@ -1,5 +1,6 @@
 out/
 kernel/kallrecon/
+*.zip
 *.ko
 *.o
 *.mod
