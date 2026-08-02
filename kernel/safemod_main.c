@@ -7,6 +7,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/ctype.h>
+#include <linux/slab.h>
 #include "lib/core.h"
 #include "signature.h"
 
@@ -19,9 +20,14 @@
 #define SAFEMOD_VERDICT_CLEAN 0
 #define SAFEMOD_VERDICT_SUSPECT 1
 #define SAFEMOD_VERDICT_SUKISU 2
+#define SAFEMOD_VERDICT_UNKNOWN 3
 
 #define SAFEMOD_BONUS_STRING_RE 15
 #define SAFEMOD_BONUS_STRING 10
+
+static bool safemod_scan = true;
+module_param(safemod_scan, bool, 0644);
+MODULE_PARM_DESC(safemod_scan, "enable rodata string scan fallback");
 
 struct safemod_hit {
 	const char *name;
@@ -29,6 +35,7 @@ struct safemod_hit {
 	int weight;
 	enum safemod_fork fork;
 	bool conditional;
+	bool str_hit;
 };
 
 struct safemod_report {
@@ -37,6 +44,7 @@ struct safemod_report {
 	int verdict;
 	bool degraded;
 	bool string_validated;
+	bool scan_skipped;
 	char version_string[SAFEMOD_STR_MAX];
 	struct safemod_hit hits[SAFEMOD_MAX_HITS];
 };
@@ -46,7 +54,7 @@ static struct safemod_report safemod_report;
 static int safemod_verdict_str(char *buf, size_t size)
 {
 	static const char *const names[] = {
-		"CLEAN", "SUSPECT", "SUKISU",
+		"CLEAN", "SUSPECT", "SUKISU", "UNKNOWN",
 	};
 	return snprintf(buf, size, "%s", names[safemod_report.verdict]);
 }
@@ -57,6 +65,40 @@ static const char *safemod_fork_name(enum safemod_fork fork)
 		"Ultra", "ReSukiSU", "shared",
 	};
 	return names[fork];
+}
+
+static void safemod_record_hit(const struct safemod_sig *sig, unsigned long addr)
+{
+	struct safemod_hit *hit;
+
+	if (safemod_report.hit_count >= SAFEMOD_MAX_HITS) {
+		return;
+	}
+	hit = &safemod_report.hits[safemod_report.hit_count++];
+	hit->name = sig->name;
+	hit->addr = addr;
+	hit->weight = sig->weight;
+	hit->fork = sig->fork;
+	hit->conditional = sig->conditional;
+	hit->str_hit = false;
+	safemod_report.score += sig->weight;
+}
+
+static void safemod_record_str(const struct safemod_strsig *sig, unsigned long addr)
+{
+	struct safemod_hit *hit;
+
+	if (safemod_report.hit_count >= SAFEMOD_MAX_HITS) {
+		return;
+	}
+	hit = &safemod_report.hits[safemod_report.hit_count++];
+	hit->name = sig->str;
+	hit->addr = addr;
+	hit->weight = sig->weight;
+	hit->fork = sig->fork;
+	hit->conditional = false;
+	hit->str_hit = true;
+	safemod_report.score += sig->weight;
 }
 
 static long safemod_sign_extend(unsigned long imm, int bits)
@@ -120,18 +162,53 @@ static int safemod_version_validate(unsigned long fn_addr)
 	return 0;
 }
 
+static void safemod_string_scan(void)
+{
+	unsigned long start, end, page;
+	char *buf;
+	int i;
+
+	if (!safemod_scan) {
+		return;
+	}
+	start = kallsyms_name_to_addr("__start_rodata");
+	end = kallsyms_name_to_addr("__end_rodata");
+	if (!start || !end || end <= start) {
+		safemod_report.scan_skipped = true;
+		return;
+	}
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf) {
+		safemod_report.scan_skipped = true;
+		return;
+	}
+	for (page = start; page < end && safemod_report.hit_count < SAFEMOD_MAX_HITS;
+	     page += PAGE_SIZE) {
+		char *p;
+
+		if (safe_read(buf, (void *)page, PAGE_SIZE)) {
+			continue;
+		}
+		for (i = 0; i < SAFEMOD_STR_COUNT; i++) {
+			const struct safemod_strsig *sig = &safemod_str_signatures[i];
+
+			p = memchr(buf, sig->str[0], PAGE_SIZE);
+			if (p && strnstr(p, sig->str, PAGE_SIZE - (p - buf))) {
+				safemod_record_str(sig, page + (p - buf));
+			}
+		}
+	}
+	kfree(buf);
+}
+
 static __nocfi void safemod_run_probe(void)
 {
 	int i;
 
 	for (i = 0; i < SAFEMOD_SIG_COUNT; i++) {
 		const struct safemod_sig *sig = &safemod_signatures[i];
-		struct safemod_hit *hit;
 		unsigned long addr;
 
-		if (safemod_report.hit_count >= SAFEMOD_MAX_HITS) {
-			break;
-		}
 		addr = kallrecon_klp ? kallrecon_klp(sig->name) : 0;
 		if (!addr) {
 			addr = kallsyms_name_to_addr(sig->name);
@@ -139,13 +216,7 @@ static __nocfi void safemod_run_probe(void)
 		if (!addr) {
 			continue;
 		}
-		hit = &safemod_report.hits[safemod_report.hit_count++];
-		hit->name = sig->name;
-		hit->addr = addr;
-		hit->weight = sig->weight;
-		hit->fork = sig->fork;
-		hit->conditional = sig->conditional;
-		safemod_report.score += sig->weight;
+		safemod_record_hit(sig, addr);
 	}
 
 	for (i = 0; i < safemod_report.hit_count; i++) {
@@ -162,6 +233,10 @@ static __nocfi void safemod_run_probe(void)
 		} else if (ret == -1) {
 			safemod_report.score += SAFEMOD_BONUS_STRING;
 		}
+	}
+
+	if (!safemod_report.hit_count) {
+		safemod_string_scan();
 	}
 
 	if (safemod_report.score >= 100) {
@@ -217,12 +292,16 @@ static int safemod_proc_show(struct seq_file *m, void *v)
 	if (safemod_report.degraded) {
 		seq_puts(m, "degraded: kallsyms_lookup_name unavailable\n");
 	}
+	if (safemod_report.scan_skipped) {
+		seq_puts(m, "string_scan: skipped, rodata bounds unavailable\n");
+	}
 	for (i = 0; i < safemod_report.hit_count; i++) {
 		const struct safemod_hit *hit = &safemod_report.hits[i];
 
-		seq_printf(m, "hit: %-40s %3d %-8s %lx%s\n", hit->name,
+		seq_printf(m, "hit: %-40s %3d %-8s %lx%s%s\n", hit->name,
 			   hit->weight, safemod_fork_name(hit->fork), hit->addr,
-			   hit->conditional ? " [conditional]" : "");
+			   hit->conditional ? " [conditional]" : "",
+			   hit->str_hit ? " [string]" : "");
 	}
 	return 0;
 }
@@ -244,11 +323,12 @@ static int __init safemod_init(void)
 	char verdict[16];
 
 	find_kallsyms_base();
-	if (!klnum_val) {
-		pr_err("safemod: kallsyms base discovery failed\n");
-		return -ENODEV;
+	if (klnum_val) {
+		safemod_run_probe();
+	} else {
+		safemod_report.degraded = true;
+		safemod_report.verdict = SAFEMOD_VERDICT_UNKNOWN;
 	}
-	safemod_run_probe();
 	proc_create(SAFEMOD_PROC_NAME, 0444, NULL, &safemod_proc_fops);
 	safemod_verdict_str(verdict, sizeof(verdict));
 	pr_info("safemod: verdict %s score %d hits %d\n", verdict,

@@ -61,4 +61,29 @@ static const struct safemod_sig safemod_signatures[] = {
 
 #define SAFEMOD_SIG_COUNT ARRAY_SIZE(safemod_signatures)
 
+struct safemod_strsig {
+	const char *str;
+	int weight;
+	enum safemod_fork fork;
+};
+
+static const struct safemod_strsig safemod_str_signatures[] = {
+	/* Ultra, ioctl names and module params */
+	{ "KPM_OPERATION", 85, SAFEMOD_FORK_ULTRA },
+	{ "GET_ENABLE_KPM", 60, SAFEMOD_FORK_ULTRA },
+	{ "SET_SPOOF_VERSION", 55, SAFEMOD_FORK_ULTRA },
+	{ "LIST_TRY_UMOUNT", 55, SAFEMOD_FORK_ULTRA },
+	{ "spoof_release", 55, SAFEMOD_FORK_ULTRA },
+	/* ReSukiSU, ioctl names and version string */
+	{ "ReSukiSU", 100, SAFEMOD_FORK_RESUKISU },
+	{ "GET_KERNEL_PATCH_IMPLEMENT", 85, SAFEMOD_FORK_RESUKISU },
+	{ "SET_DYNAMIC_MANAGER", 55, SAFEMOD_FORK_RESUKISU },
+	{ "GET_MANAGERS", 55, SAFEMOD_FORK_RESUKISU },
+	/* shared, both forks */
+	{ "GET_FULL_VERSION", 50, SAFEMOD_FORK_SHARED },
+	{ "GET_HOOK_TYPE", 50, SAFEMOD_FORK_SHARED },
+};
+
+#define SAFEMOD_STR_COUNT ARRAY_SIZE(safemod_str_signatures)
+
 #endif
