@@ -5,6 +5,9 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -92,6 +95,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: safemod-module-*
+          merge-multiple: true
           path: mod
 
       - uses: softprops/action-gh-release@v2
