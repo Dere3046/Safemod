@@ -1,0 +1,14 @@
+out/
+*.ko
+*.o
+*.mod
+*.mod.c
+*.mod.o
+*.symvers
+*.lds
+Module.symvers
+modules.order
+.module-common.o
+.safemod*
+.*.cmd
+.tmp_versions/
