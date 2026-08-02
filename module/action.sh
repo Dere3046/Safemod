@@ -4,6 +4,8 @@ MODDIR=${0%/*}
 AUDIT="$MODDIR/audit.log"
 LKM="$MODDIR/lib/arm64-v8a/lkm"
 
+. "$MODDIR/lib/arm64-v8a/status.sh"
+
 krel=$(uname -r)
 pair=$(echo "$krel" | cut -d. -f1-2)
 android=$(echo "$krel" | sed -n 's/.*-android\([0-9]*\)-.*/\1/p')
@@ -33,4 +35,11 @@ rmmod safemod 2>/dev/null
     echo "==== $(date '+%F %T') kernel $krel ===="
     echo "$result"
 } >> "$AUDIT"
+
+ker=$(echo "$result" | sed -n 's/^verdict: //p' | tr '[:upper:]' '[:lower:]')
+user=""
+[ -f "$STATUS" ] && . "$STATUS"
+echo "user=$user" > "$STATUS"
+echo "ker=$ker" >> "$STATUS"
+safemod_refresh_desc
 echo "$result"
