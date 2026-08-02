@@ -53,19 +53,28 @@ jobs:
           merge-multiple: true
           path: kos
 
+      - name: Fetch update-binary
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/topjohnwu/Magisk/v30.7/scripts/module_installer.sh \
+            -o module/META-INF/com/google/android/update-binary
+          chmod 755 module/META-INF/com/google/android/update-binary
+
       - name: Assemble module
         run: |
           set -e
           mkdir -p module/lib/arm64-v8a/lkm
           cp kos/*.ko module/lib/arm64-v8a/lkm/
           chmod 755 module/*.sh module/lib/arm64-v8a/safemod-user.sh
-          cd module
-          zip -r9 ../safemod-module.zip .
+          VERSION=$(grep '^version=' module/module.prop | cut -d= -f2)
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          echo "$VERSION-$SHORT_SHA" > module/VERSION
+          echo "MOD_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "MOD_SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: safemod-module
-          path: safemod-module.zip
+          name: safemod-module-${{ env.MOD_VERSION }}-${{ env.MOD_SHORT_SHA }}
+          path: module/
           if-no-files-found: error
 
   release:
@@ -81,12 +90,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: safemod-module
+          pattern: safemod-module-*
           path: mod
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             ko/*.ko
-            mod/safemod-module.zip
+            mod/*.zip
           generate_release_notes: true
