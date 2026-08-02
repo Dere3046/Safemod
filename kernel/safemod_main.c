@@ -43,6 +43,7 @@ struct safemod_report {
 	int hit_count;
 	int verdict;
 	bool degraded;
+	bool module_present;
 	bool string_validated;
 	bool scan_skipped;
 	char version_string[SAFEMOD_STR_MAX];
@@ -239,6 +240,11 @@ static __nocfi void safemod_run_probe(void)
 		safemod_string_scan();
 	}
 
+	if (kallrecon_klp && (kallrecon_klp("kernelsu_init") ||
+			      kallrecon_klp("ksu_cred"))) {
+		safemod_report.module_present = true;
+	}
+
 	if (safemod_report.score >= 100) {
 		safemod_report.verdict = SAFEMOD_VERDICT_SUKISU;
 	} else if (safemod_report.score > 0) {
@@ -281,6 +287,9 @@ static int safemod_proc_show(struct seq_file *m, void *v)
 	safemod_verdict_str(verdict, sizeof(verdict));
 	seq_printf(m, "verdict: %s\n", verdict);
 	seq_printf(m, "score: %d\n", safemod_report.score);
+	if (safemod_report.module_present) {
+		seq_puts(m, "module: kernelsu present\n");
+	}
 	if (safemod_report.hit_count) {
 		seq_printf(m, "fork: %s\n",
 			   safemod_fork_name(safemod_dominant_fork()));
