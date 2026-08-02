@@ -1,5 +1,5 @@
 obj-m := safemod.o
-safemod-objs := safemod_main.o lib/core.o lib/slide.o
+safemod-objs := safemod_main.o kallrecon/lib/core.o kallrecon/lib/slide.o
 
 ccflags-y += -std=gnu11
 ccflags-y += -Wno-declaration-after-statement

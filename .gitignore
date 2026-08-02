@@ -1,4 +1,5 @@
 out/
+kernel/kallrecon/
 *.ko
 *.o
 *.mod

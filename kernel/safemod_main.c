@@ -8,7 +8,7 @@
 #include <linux/seq_file.h>
 #include <linux/ctype.h>
 #include <linux/slab.h>
-#include "lib/core.h"
+#include "kallrecon/lib/core.h"
 #include "signature.h"
 
 #define SAFEMOD_PROC_NAME "safemod"
