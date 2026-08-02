@@ -98,9 +98,14 @@ jobs:
           merge-multiple: true
           path: mod
 
+      - name: Package module
+        run: |
+          cd mod
+          zip -r9 ../safemod-module.zip .
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             ko/*.ko
-            mod/*.zip
+            safemod-module.zip
           generate_release_notes: true
